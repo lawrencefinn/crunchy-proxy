@@ -15,6 +15,8 @@ limitations under the License.
 package proxy
 
 import (
+	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -130,10 +132,14 @@ func (p *Proxy) HandleConnection(client net.Conn) {
 		log.Errorf("Error: %s", err.Error())
 	}
 
+	log.Infof("Handling connection %s", string(message))
+
 	/* Get the protocol from the startup message.*/
 	version := protocol.GetVersion(message)
 
 	/* Handle the case where the startup message was an SSL request. */
+	log.Infof("Version %s",  version)
+	log.Infof("Message %v length %d", message, length)
 	if version == protocol.SSLRequestCode {
 		sslResponse := protocol.NewMessageBuffer([]byte{})
 
@@ -142,6 +148,7 @@ func (p *Proxy) HandleConnection(client net.Conn) {
 		if creds.SSL.Enable {
 			sslResponse.WriteByte(protocol.SSLAllowed)
 		} else {
+			log.Info("Sending no ssl")
 			sslResponse.WriteByte(protocol.SSLNotAllowed)
 		}
 
@@ -164,6 +171,23 @@ func (p *Proxy) HandleConnection(client net.Conn) {
 			log.Info("The client closed the connection.")
 			return
 		}
+		if length == 0 {
+			messageToSend := make([]byte, 9)
+			messageToSend[0] = 'R'
+			var someLength uint32
+			someLength = 8
+			var someMessage uint32
+			someMessage = 0
+			binary.BigEndian.PutUint32(messageToSend[1:5], someLength)
+			binary.BigEndian.PutUint32(messageToSend[5:9], someMessage)
+			fmt.Printf("Binary %v", messageToSend)
+			connect.Send(client, messageToSend)
+		}
+		if message, length, err = connect.Receive(client); err == io.EOF {
+			log.Info("The client closed the connection.")
+			return
+		}
+		log.Infof("Message %s length %d", message, length)
 	}
 
 	/*
@@ -181,23 +205,126 @@ func (p *Proxy) HandleConnection(client net.Conn) {
 		}
 
 		connect.Send(client, pgError.GetMessage())
-		log.Error("Could not validate client")
+		log.Errorf("Could not validate client %s", pgError.GetMessage())
 		return
 	}
 
 	/* Authenticate the client against the appropriate backend. */
 	log.Infof("Client: %s - authenticating", client.RemoteAddr())
-	authenticated, err := connect.AuthenticateClient(client, message, length)
+	//authenticated, err := connect.AuthenticateClient(client, message, length)
+	//log.Infof("Authenticated? %v", authenticated)
+	messageToSend := make([]byte, 13)
+	messageToSend[0] = 'R'
+	var someLength uint32
+	someLength = 12
+	var someMessage uint32
+	someMessage = 5
+	binary.BigEndian.PutUint32(messageToSend[1:5], someLength)
+	binary.BigEndian.PutUint32(messageToSend[5:9], someMessage)
+	messageToSend[9] = byte(81)
+	messageToSend[10] = byte(31)
+	messageToSend[11] = byte(191)
+	messageToSend[12] = byte(4)
+	fmt.Printf("Binary %v", messageToSend)
+	_, err = connect.Send(client, messageToSend)
+	message, length, err = connect.Receive(client)
+	fmt.Printf("Another response %s %v", message, message)
 
+	okMessage := make([]byte, 9)
+	okMessage[0] = 'R'
+	someLength = 8
+	someMessage = 0
+	binary.BigEndian.PutUint32(okMessage[1:5], someLength)
+	binary.BigEndian.PutUint32(okMessage[5:9], someMessage)
+	fmt.Printf("Sending %s %v\n", okMessage, okMessage)
+	_, err = connect.Send(client, okMessage)
+	//message, length, err = connect.Receive(client)
+	//fmt.Printf("Another response %s %v\n", message, message)
+	//fmt.Printf("WTF\n")
+
+	okMessage = make([]byte, 6)
+	okMessage[0] = 'Z'
+	someLength = 5
+	binary.BigEndian.PutUint32(okMessage[1:5], someLength)
+	okMessage[5] = 'I'
+	fmt.Printf("Sending %s %v\n", okMessage, okMessage)
+	_, err = connect.Send(client, okMessage)
+	message, length, err = connect.Receive(client)
+	fmt.Printf("ZI response %s %v\n", message, message)
+
+	if message[0] == 'P' {
+		queryLength := binary.BigEndian.Uint32(message[1:5])
+		buffer := protocol.NewMessageBuffer(message)
+		buffer.Seek(5)
+		preparedStmtName, _ := buffer.ReadString()
+		//buffer.Seek(5 + len(preparedStmtName))
+		query, _ := buffer.ReadString()
+		numParams, _ := buffer.ReadInt16()
+		fmt.Printf("Looks like a parse query of length %d \"%s\" \"%s\" %d\n", queryLength, preparedStmtName, query,  numParams)
+		bindByte, _ := buffer.ReadByte()
+		if bindByte == 'B' {
+			bindLength, _ := buffer.ReadInt32()
+			fmt.Printf("Bind byte? %s %d\n", string(bindByte), bindLength)
+			buffer.ReadBytes(int(bindLength - 4))
+		}
+		describeByte, _ := buffer.ReadByte()
+		if describeByte == 'D' {
+			dataLength, _ := buffer.ReadInt32()
+			describeType, _ := buffer.ReadByte()
+			describeName, _ := buffer.ReadString()
+			fmt.Printf("Data byte? %s %d %s \"%s\"\n", string(describeByte), dataLength, string(describeType), describeName)
+		}
+		executeByte, _ := buffer.ReadByte()
+		if executeByte == 'E' {
+			executeLength, _ := buffer.ReadInt32()
+			executeName, _ := buffer.ReadString()
+			maxRows, _ := buffer.ReadInt32()
+			fmt.Printf("Execute byte %s %d \"%s\" %d\n", string(executeByte), executeLength, executeName, maxRows)
+		}
+		flushByte, _ := buffer.ReadByte()
+		if flushByte == 'H' {
+			flushLength, _ := buffer.ReadInt32()
+			fmt.Printf("Flush byte %s %d\n", string(flushByte), flushLength)
+		}
+		syncByte, _ := buffer.ReadByte()
+		if syncByte == 'S' {
+			syncLength, _ := buffer.ReadInt32()
+			fmt.Printf("Sync byte %s %d\n", string(syncByte), syncLength)
+		}
+	}
+
+	noMessage := make([]byte, 5)
+	noMessage[0] = 'n'
+	someLength = 4
+	binary.BigEndian.PutUint32(noMessage[1:5], someLength)
+
+	parseMessage := make([]byte, 5)
+	parseMessage[0] = '1'
+	someLength = 4
+	binary.BigEndian.PutUint32(parseMessage[1:5], someLength)
+	bindMessage := make([]byte, 5)
+	bindMessage[0] = '2'
+	someLength = 4
+	binary.BigEndian.PutUint32(bindMessage[1:5], someLength)
+	fmt.Printf("Sending %s %v\n", parseMessage, parseMessage)
+	_, err = connect.Send(client, parseMessage)
+	_, err = connect.Send(client, bindMessage)
+	_, err = connect.Send(client, noMessage)
+	_, err = connect.Send(client, okMessage)
+	message, length, err = connect.Receive(client)
+	fmt.Printf("ZI response %s %v", message, message)
+
+	authenticated := true
 	/* If the client could not authenticate then go no further. */
 	if err == io.EOF {
+		log.Error("Bleh eof")
 		return
 	} else if !authenticated {
 		log.Errorf("Client: %s - authentication failed", client.RemoteAddr())
 		log.Errorf("Error: %s", err.Error())
 		return
 	} else {
-		log.Debugf("Client: %s - authentication successful", client.RemoteAddr())
+		log.Infof("Client: %s - authentication successful", client.RemoteAddr())
 	}
 
 	/* Process the client messages for the life of the connection. */

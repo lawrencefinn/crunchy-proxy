@@ -1,33 +1,27 @@
 server:
   proxy:
-    hostport: proxy.crunchy.lab:5432
+    hostport: localhost:5432
   admin:
     hostport: localhost:10000
 nodes:
   master:
-    hostport: master.crunchy.lab:5432
+    hostport: journeys-redshift-dev.ciocgeapvkql.us-east-1.redshift.amazonaws.com:5439
     role: master
     metadata:
       cpu: large
       disk: fast
-  replica:
-    role: replica
-    hostport: replica.crunchy.lab:5432
-    metadata:
-      cpu: small
-      disk: slow
 
 healthcheck:
   delay: 60
   query: select now();
 
 pool:
-  capacity: 2
+  capacity: 1
 
 credentials:
-  username: postgres
-  database: postgres
-  password: password
+  username: larry
+  database: larry
+  password: T4XY6b97scVZju
   options:
     application_name: crunchy-proxy
   ssl:

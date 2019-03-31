@@ -16,6 +16,7 @@ limitations under the License.
 package proxy
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/crunchydata/crunchy-proxy/protocol"
@@ -33,6 +34,7 @@ func getAnnotations(m []byte) map[AnnotationType]bool {
 	message.ReadByte()  // read past the message type
 	message.ReadInt32() // read past the message length
 	query, _ := message.ReadString()
+	fmt.Println("QUERY ", query)
 
 	/* Find the start and end position of the annotations. */
 	startPos := strings.Index(query, AnnotationStartToken)

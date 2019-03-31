@@ -167,11 +167,13 @@ func AuthenticateClient(client net.Conn, message []byte, length int) (bool, erro
 
 	/* Relay the startup message to master node. */
 	log.Debug("client auth: relay startup message to 'master' node")
+	log.Infof("Sending for auth %s %v", message[:length], message[:length])
 	_, err = master.Write(message[:length])
 
 	/* Receive startup response. */
 	log.Debug("client auth: receiving startup response from 'master' node")
 	message, length, err = Receive(master)
+	log.Infof("Received message %s %v", message, message)
 
 	if err != nil {
 		log.Error("An error occurred receiving startup response.")
@@ -189,6 +191,7 @@ func AuthenticateClient(client net.Conn, message []byte, length int) (bool, erro
 		(messageType != protocol.ErrorMessageType) {
 		Send(client, message[:length])
 		message, length, err = Receive(client)
+		log.Infof("Auth resp %s %v", message, message)
 
 		/*
 		 * Must check that the client has not closed the connection.  This in
@@ -210,6 +213,18 @@ func AuthenticateClient(client net.Conn, message []byte, length int) (bool, erro
 		Send(master, message[:length])
 
 		message, length, err = Receive(master)
+		log.Infof("Headers resp %s %v", message, message)
+		startup := protocol.NewMessageBuffer(message)
+		startup.Seek(8)
+
+		for {
+			param, err := startup.ReadString()
+			log.Infof("Param %s", param)
+
+			if err == io.EOF || param == "\x00" {
+				break
+			}
+		}
 
 		messageType = protocol.GetMessageType(message)
 	}
@@ -221,9 +236,35 @@ func AuthenticateClient(client net.Conn, message []byte, length int) (bool, erro
 	 */
 	log.Debug("client auth: checking authentication repsonse")
 	if protocol.IsAuthenticationOk(message) {
-		termMsg := protocol.GetTerminateMessage()
-		Send(master, termMsg)
+		//termMsg := protocol.GetTerminateMessage()
+		//Send(master, termMsg)
 		Send(client, message[:length])
+		message, length, err = Receive(client)
+		fmt.Printf("Request? %s %v\n", message, message)
+		Send(master, message[:length])
+		message, length, err = Receive(master)
+		fmt.Printf("Response 2? %s %v\n", message, message)
+		Send(client, message[:length])
+		message, length, err = Receive(master)
+		fmt.Printf("Response 3? %s %v\n", message, message)
+		Send(client, message[:length])
+		i := 4
+		for {
+			message, length, err = Receive(client)
+			fmt.Printf("Request %d? %s %v\n", i, message, message)
+			i++
+			Send(master, message[:length])
+			message, length, err = Receive(master)
+			fmt.Printf("Response %d? %s %v\n", i, message, message)
+			Send(client, message[:length])
+			i++
+			if i == 8 {
+				message, length, err = Receive(master)
+				fmt.Printf("Response %d? %s %v\n", i, message, message)
+				i++
+				Send(client, message[:length])
+			}
+		}
 		return true, nil
 	}
 
@@ -247,11 +288,13 @@ func ValidateClient(message []byte) bool {
 	creds := config.GetCredentials()
 
 	startup := protocol.NewMessageBuffer(message)
+	log.Infof("Message %s", string(message))
 
 	startup.Seek(8) // Seek past the message length and protocol version.
 
 	for {
 		param, err := startup.ReadString()
+		// log.Infof("Param %s", param)
 
 		if err == io.EOF || param == "\x00" {
 			break
@@ -264,6 +307,7 @@ func ValidateClient(message []byte) bool {
 			clientDatabase, err = startup.ReadString()
 		}
 	}
+	log.Infof("User %s db %s expected %s %s", clientUser, clientDatabase, creds.Username, creds.Password)
 
 	return (clientUser == creds.Username && clientDatabase == creds.Database)
 }

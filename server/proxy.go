@@ -52,6 +52,7 @@ func (s *ProxyServer) Serve(l net.Listener) error {
 		}
 
 		conn, err := l.Accept()
+		log.Info("accepted")
 
 		if err != nil {
 			continue
