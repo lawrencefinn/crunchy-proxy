@@ -123,12 +123,9 @@ func (p *Proxy) returnPool(pl *pool.Pool, read bool) {
 }
 
 func ListenForMessage(client net.Conn) error {
-	message, length, err := connect.Receive(client)
+	message, _, err := connect.Receive(client)
 	if err != nil {
 		return err
-	}
-	if length < 1 {
-		return io.EOF
 	}
 	log.Infof("Incoming message %s %v", message, message)
 
@@ -271,6 +268,35 @@ func ListenForMessage(client net.Conn) error {
 			initValuesData[0] = 'D'
 			// just removed first 68 / D
 			initValuesData = append(initValuesData, []byte{0, 0, 0, 130, 0, 1, 0, 0, 0, 120, 80, 111, 115, 116, 103, 114, 101, 83, 81, 76, 32, 56, 46, 48, 46, 50, 32, 111, 110, 32, 105, 54, 56, 54, 45, 112, 99, 45, 108, 105, 110, 117, 120, 45, 103, 110, 117, 44, 32, 99, 111, 109, 112, 105, 108, 101, 100, 32, 98, 121, 32, 71, 67, 67, 32, 103, 99, 99, 32, 40, 71, 67, 67, 41, 32, 51, 46, 52, 46, 50, 32, 50, 48, 48, 52, 49, 48, 49, 55, 32, 40, 82, 101, 100, 32, 72, 97, 116, 32, 51, 46, 52, 46, 50, 45, 54, 46, 102, 99, 51, 41, 44, 32, 82, 101, 100, 115, 104, 105, 102, 116, 32, 49, 46, 48, 46, 54, 55, 53, 52}...)
+
+			fmt.Printf("Sending %s %v\n", parseMessage, parseMessage)
+			fmt.Printf("Sending %s %v\n", bindMessage, bindMessage)
+			fmt.Printf("Sending %s %v\n", initValuesColumns, initValuesColumns)
+			fmt.Printf("Sending %s %v\n", initValuesData, initValuesData)
+			fmt.Printf("Sending %s %v\n", commandCompleteSelect, commandCompleteSelect)
+			fmt.Printf("Sending %s %v\n", okMessage, okMessage)
+
+			_, err = connect.Send(client, parseMessage)
+			_, err = connect.Send(client, bindMessage)
+			_, err = connect.Send(client, initValuesColumns)
+			_, err = connect.Send(client, initValuesData)
+			_, err = connect.Send(client, commandCompleteSelect)
+			_, err = connect.Send(client, okMessage)
+		} else if query == "select current_schema()" {
+			initValuesColumns := make([]byte, 7)
+			initValuesColumns[0] = 'T'
+			binary.BigEndian.PutUint16(initValuesColumns[5:7], 1)
+			initValuesColumns = append(initValuesColumns, []byte("current_schema")...)
+			initValuesColumns = append(initValuesColumns, byte(0))
+			initValuesColumns = append(initValuesColumns, []byte{0, 0, 0, 0, 0, 0, 0, 0, 4, 19, 255, 255, 0, 1, 0, 3, 0, 0}...)
+			binary.BigEndian.PutUint32(initValuesColumns[1:5], uint32(len(initValuesColumns) - 1))
+
+			initValuesData := make([]byte, 11)
+			initValuesData[0] = 'D'
+			binary.BigEndian.PutUint16(initValuesData[5:7], 1)
+			binary.BigEndian.PutUint32(initValuesData[7:11], uint32(len("public")))
+			initValuesData = append(initValuesData, []byte("public")...)
+			binary.BigEndian.PutUint32(initValuesData[1:5], uint32(len(initValuesData) - 1))
 
 			fmt.Printf("Sending %s %v\n", parseMessage, parseMessage)
 			fmt.Printf("Sending %s %v\n", bindMessage, bindMessage)
@@ -439,6 +465,7 @@ func (p *Proxy) HandleConnection(client net.Conn) {
 	for {
 		msgErr := ListenForMessage(client)
 		if msgErr == io.EOF {
+			log.Info("EOF")
 			break
 		} else if msgErr != nil {
 			log.Errorf("Some error %v", msgErr)
